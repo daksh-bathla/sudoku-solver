@@ -109,22 +109,75 @@ class ImageProcessor:
     @staticmethod
     def extract_digit_from_cell(cell_img):
         """
-        Extract digit from single cell.
-        Placeholder: returns 0 (empty cell).
-        For production, integrate pytesseract, TensorFlow, or other OCR.
+        Extract digit from single cell using OCR (pytesseract).
+        Falls back to contour-based detection if OCR unavailable.
+        Returns 0 for empty cells.
         """
-        # Find contours in cell to detect digit
-        gray = cv2.cvtColor(cell_img, cv2.COLOR_BGR2GRAY) if len(cell_img.shape) == 3 else cell_img
-        _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
+        # Convert to grayscale
+        if len(cell_img.shape) == 3:
+            gray = cv2.cvtColor(cell_img, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = cell_img
 
+        # Enhance contrast
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+
+        # Threshold
+        _, thresh = cv2.threshold(enhanced, 127, 255, cv2.THRESH_BINARY)
+
+        # Find contours (digit)
         contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
             return 0  # Empty cell
 
-        # If significant contour found, digit might exist
-        # Would use ML model here for actual recognition
-        return 0  # Placeholder
+        # Check if any significant contour (not noise)
+        largest = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(largest)
+
+        # If contour too small, likely empty
+        if area < 50:
+            return 0
+
+        # Try OCR with pytesseract
+        try:
+            import pytesseract
+
+            # Upscale for better OCR
+            upscaled = cv2.resize(thresh, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+            text = pytesseract.image_to_string(
+                upscaled, config="--psm 10 -c tessedit_char_whitelist=0123456789"
+            )
+            digit = int(text.strip()) if text.strip().isdigit() else 0
+            return digit if 0 <= digit <= 9 else 0
+
+        except ImportError:
+            # Fallback: contour-based detection (less accurate)
+            return ImageProcessor._detect_digit_by_contour(gray, thresh)
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _detect_digit_by_contour(gray, thresh):
+        """Fallback digit detection using contour analysis. Returns 0 (empty) if unreliable."""
+        contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+        if not contours:
+            return 0
+
+        # Get largest contour
+        largest = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(largest)
+
+        # Very conservative: only accept if reasonable digit size range
+        # Most printed digits in a 50x50 cell are 200-800 pixels
+        if area < 100 or area > 1000:
+            return 0  # Too small (noise) or too large
+
+        # Still can't reliably identify which digit without OCR
+        # Return 0 to indicate unknown
+        return 0
 
     @classmethod
     def extract_grid_from_image(cls, img_path):

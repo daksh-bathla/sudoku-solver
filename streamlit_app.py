@@ -20,7 +20,7 @@ st.set_page_config(page_title="Sudoku Solver", layout="wide")
 
 st.title("🧩 Sudoku Solver")
 st.write(
-    "Solve Sudoku puzzles from images or hardcoded arrays using backtracking + OpenCV preprocessing."
+    "Upload a Sudoku puzzle image → Get solved puzzle image. Or enter puzzle manually."
 )
 
 # Sample puzzle for reference
@@ -37,10 +37,131 @@ SAMPLE_PUZZLE = [
 ]
 
 # Tabs for different input methods
-tab1, tab2, tab3 = st.tabs(["📋 Array Input", "🖼️ Image Upload", "ℹ️ Info"])
+tab1, tab2, tab3 = st.tabs(["🖼️ Image Upload", "📋 Array Input", "ℹ️ Info"])
 
 with tab1:
-    st.subheader("Enter Sudoku Puzzle (9×9 Array)")
+    st.subheader("Upload Sudoku Image")
+    st.write("📸 Upload a photo/scan of a Sudoku puzzle. We'll extract, solve, and show you the answer.")
+
+    uploaded_file = st.file_uploader("Choose image...", type=["png", "jpg", "jpeg"])
+
+    if uploaded_file:
+        # Save temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            tmp.write(uploaded_file.getbuffer())
+            tmp_path = tmp.name
+
+        try:
+            # Show uploaded image
+            uploaded_img = Image.open(uploaded_file)
+
+            col_info, col_img = st.columns([1, 2])
+            with col_info:
+                st.write("**Uploaded Image**")
+            with col_img:
+                st.image(uploaded_img, use_container_width=True)
+
+            # Extract grid with progress
+            with st.spinner("🔍 Extracting Sudoku grid..."):
+                gray, thresh, original_img = ImageProcessor.preprocess(tmp_path)
+                grid, warped = ImageProcessor.extract_grid_from_image(tmp_path)
+
+            st.success("✅ Grid extracted!")
+
+            # Show extracted grid array
+            with st.expander("📊 Show Extracted Numbers (click to expand)"):
+                st.write(grid)
+                st.write("(0 = empty cell)")
+                st.info("💡 If OCR missed digits or got them wrong, edit below and re-solve.")
+
+            # Option to edit extracted grid
+            with st.expander("✏️ Edit Extracted Puzzle (if needed)"):
+                st.write("Correct any errors in the extracted puzzle before solving:")
+                edited_text = st.text_area(
+                    "Edit grid:",
+                    value="\n".join([" ".join(map(str, row)) for row in grid]),
+                    height=150,
+                    key="edited_grid"
+                )
+
+                try:
+                    lines = edited_text.strip().split("\n")
+                    edited_grid = []
+                    for line in lines:
+                        row = [int(x) for x in line.replace(",", " ").split() if x]
+                        if len(row) == 9:
+                            edited_grid.append(row)
+                    if len(edited_grid) == 9:
+                        grid = np.array(edited_grid)
+                        st.success("✅ Grid updated!")
+                except:
+                    st.warning("⚠️ Invalid format. Keep original grid.")
+
+            # Solve
+            with st.spinner("🧮 Solving puzzle..."):
+                solver = SudokuSolver()
+                try:
+                    solved, original = solver.solve(grid)
+                    st.success("✅ Puzzle solved!")
+
+                    # Display side-by-side
+                    sol_col1, sol_col2 = st.columns(2)
+
+                    with sol_col1:
+                        st.subheader("Original Puzzle")
+                        img_original = solver.render_grid(original)
+                        st.image(img_original, use_container_width=True)
+
+                    with sol_col2:
+                        st.subheader("✅ Solution (Blue = Filled)")
+                        img_solved = solver.render_grid(original, solution=solved)
+                        st.image(img_solved, use_container_width=True)
+
+                    # Download buttons
+                    st.subheader("📥 Download Results")
+                    dl_col1, dl_col2, dl_col3 = st.columns(3)
+
+                    buf1 = BytesIO()
+                    img_original.save(buf1, format="PNG")
+                    dl_col1.download_button(
+                        "Original Puzzle",
+                        buf1.getvalue(),
+                        "sudoku_original.png",
+                        "image/png",
+                    )
+
+                    buf2 = BytesIO()
+                    img_solved.save(buf2, format="PNG")
+                    dl_col2.download_button(
+                        "Solved (with answer)",
+                        buf2.getvalue(),
+                        "sudoku_solved.png",
+                        "image/png",
+                    )
+
+                    solution_text = "\n".join([" ".join(map(str, row)) for row in solved])
+                    dl_col3.download_button(
+                        "Numbers Only",
+                        solution_text,
+                        "sudoku_solution.txt",
+                        "text/plain",
+                    )
+
+                except ValueError as e:
+                    st.error(f"❌ Cannot solve: {e}")
+                    st.info("💡 Try uploading a clearer image or check if the puzzle is valid.")
+
+        except Exception as e:
+            st.error(f"❌ Error processing image: {e}")
+            st.info("💡 Make sure the image is a clear photo of a Sudoku grid.")
+
+        finally:
+            os.unlink(tmp_path)
+    else:
+        st.info("👆 Upload an image to get started. Try a clear photo from your phone or a scanned page.")
+
+with tab2:
+    st.subheader("Enter Sudoku Puzzle Manually")
     st.write("Use 0 for empty cells. Rows separated by newlines, values by spaces or commas.")
 
     # Text area for puzzle input
@@ -101,9 +222,9 @@ with tab1:
             buf2 = BytesIO()
             img_solved.save(buf2, format="PNG")
             col2.download_button(
-                "Overlay",
+                "Solved",
                 buf2.getvalue(),
-                "solved_overlay.png",
+                "solved_puzzle.png",
                 "image/png",
             )
 
@@ -122,119 +243,6 @@ with tab1:
     if col2.button("📋 Load Sample", key="load_sample"):
         st.toast("Sample puzzle loaded!")
         st.rerun()
-
-with tab2:
-    st.subheader("Upload Sudoku Image")
-    st.write("PNG/JPG image of a Sudoku grid. Preprocessing shows intermediate stages.")
-
-    uploaded_file = st.file_uploader("Choose image...", type=["png", "jpg", "jpeg"])
-
-    if uploaded_file:
-        # Save temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-            tmp.write(uploaded_file.getbuffer())
-            tmp_path = tmp.name
-
-        try:
-            # Display uploaded image
-            st.subheader("Uploaded Image")
-            uploaded_img = Image.open(uploaded_file)
-            st.image(uploaded_img, use_container_width=True)
-
-            # Preprocessing
-            st.subheader("🔍 Preprocessing Stages")
-
-            gray, thresh, original_img = ImageProcessor.preprocess(tmp_path)
-
-            proc_col1, proc_col2 = st.columns(2)
-
-            with proc_col1:
-                st.write("**Grayscale**")
-                st.image(gray, use_container_width=True, channels="GRAY")
-
-            with proc_col2:
-                st.write("**Threshold (Binary)**")
-                st.image(thresh, use_container_width=True, channels="GRAY")
-
-            # Extract grid
-            if st.button("🔍 Extract Grid", key="extract_grid"):
-                try:
-                    grid, warped = ImageProcessor.extract_grid_from_image(tmp_path)
-
-                    st.subheader("Extracted Grid (Warped)")
-                    st.image(warped, use_container_width=True, channels="GRAY")
-
-                    st.info(
-                        "ℹ️ Digit extraction is a placeholder (returns 0 for all cells). "
-                        "Integrate pytesseract or TensorFlow to enable OCR."
-                    )
-
-                    st.subheader("Extracted Grid Array")
-                    st.write(grid)
-
-                    # Option to manually edit grid before solving
-                    st.subheader("📝 Edit Grid Before Solving")
-                    st.write("Replace 0s with correct digits if needed:")
-
-                    edited_text = st.text_area(
-                        "Edit grid:",
-                        value="\n".join(
-                            [" ".join(map(str, row)) for row in grid]
-                        ),
-                        height=150,
-                    )
-
-                    if st.button("🔍 Solve Extracted", key="solve_extracted"):
-                        try:
-                            lines = edited_text.strip().split("\n")
-                            puzzle = []
-                            for line in lines:
-                                row = [int(x) for x in line.replace(",", " ").split()]
-                                puzzle.append(row)
-
-                            solver = SudokuSolver()
-                            solved, original = solver.solve(puzzle)
-
-                            st.success("✅ Solved!")
-
-                            res_col1, res_col2 = st.columns(2)
-                            with res_col1:
-                                st.write("**Original**")
-                                img_orig = solver.render_grid(original)
-                                st.image(img_orig, use_container_width=True)
-
-                            with res_col2:
-                                st.write("**Solution Overlay**")
-                                img_sol = solver.render_grid(original, solution=solved)
-                                st.image(img_sol, use_container_width=True)
-
-                            # Download
-                            buf1 = BytesIO()
-                            img_orig.save(buf1, format="PNG")
-                            st.download_button(
-                                "Download Original",
-                                buf1.getvalue(),
-                                "original.png",
-                                "image/png",
-                            )
-
-                            buf2 = BytesIO()
-                            img_sol.save(buf2, format="PNG")
-                            st.download_button(
-                                "Download Solution",
-                                buf2.getvalue(),
-                                "solution.png",
-                                "image/png",
-                            )
-
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-
-                except Exception as e:
-                    st.error(f"Grid extraction failed: {e}")
-
-        finally:
-            os.unlink(tmp_path)
 
 with tab3:
     st.subheader("About")
