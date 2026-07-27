@@ -112,6 +112,9 @@ class ImageProcessor:
         Extract digit from single cell using OCR (pytesseract).
         Falls back to contour-based detection if OCR unavailable.
         Returns 0 for empty cells.
+
+        Note: pytesseract is optional. Install with: pip install pytesseract
+        Requires Tesseract binary: brew install tesseract (macOS) or apt install tesseract (Linux)
         """
         # Convert to grayscale
         if len(cell_img.shape) == 3:
@@ -140,7 +143,7 @@ class ImageProcessor:
         if area < 50:
             return 0
 
-        # Try OCR with pytesseract
+        # Try OCR with pytesseract (optional dependency)
         try:
             import pytesseract
 
@@ -153,9 +156,10 @@ class ImageProcessor:
             return digit if 0 <= digit <= 9 else 0
 
         except ImportError:
-            # Fallback: contour-based detection (less accurate)
+            # pytesseract not installed - use contour fallback
             return ImageProcessor._detect_digit_by_contour(gray, thresh)
         except Exception:
+            # Tesseract binary not available or other error
             return 0
 
     @staticmethod

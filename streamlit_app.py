@@ -72,7 +72,10 @@ with tab1:
             with st.expander("📊 Show Extracted Numbers (click to expand)"):
                 st.write(grid)
                 st.write("(0 = empty cell)")
-                st.info("💡 If OCR missed digits or got them wrong, edit below and re-solve.")
+                if np.all(grid == 0):
+                    st.warning("⚠️ No digits extracted. OCR requires pytesseract + Tesseract binary (local only). Use Array Input tab instead.")
+                else:
+                    st.info("💡 If OCR missed digits or got them wrong, edit below and re-solve.")
 
             # Option to edit extracted grid
             with st.expander("✏️ Edit Extracted Puzzle (if needed)"):
